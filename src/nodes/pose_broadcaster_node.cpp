@@ -24,7 +24,8 @@ public:
 
   void filterCallback(const lucrezio_simulation_environments::LogicalImage::ConstPtr &logical_image_msg,
                       const sensor_msgs::LaserScan::ConstPtr &laser_msg){
-    ros::Time laser_stamp = laser_msg->header.stamp;
+    //ros::Time laser_stamp = laser_msg->header.stamp; 
+    ros::Time laser_stamp = ros::Time(0);
     tf::StampedTransform camera_odom_tf;
     try{
       _listener.waitForTransform("/odom",
@@ -39,12 +40,12 @@ public:
       ROS_ERROR("%s",ex.what());
     }
     Eigen::Isometry3f camera_odom_transform = tfTransform2eigen(camera_odom_tf);
-
-    ros::Time image_stamp = logical_image_msg->header.stamp;
+    ros::Duration future_date_duration(0.3F);   //Very naive solution to extrapolation error
+    ros::Time image_stamp = (logical_image_msg->header.stamp) + future_date_duration;
     Eigen::Isometry3f camera_map_transform = poseMsg2eigen(logical_image_msg->pose);
 
     tf::Transform odom_map_tf = eigen2tfTransform(camera_map_transform*camera_odom_transform.inverse());
-    _br.sendTransform(tf::StampedTransform(odom_map_tf, image_stamp, "/map", "/odom"));
+    _br.sendTransform(tf::StampedTransform(odom_map_tf, image_stamp, "/map", "/odom")); // /map
 
 //    ROS_INFO("Laser msg stamp: %f", laser_stamp.toSec());
 //    ROS_INFO("Logical image stamp: %f", image_stamp.toSec());

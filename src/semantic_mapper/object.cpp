@@ -40,7 +40,7 @@ namespace YAML {
       if(!node.IsMap())
         return false;
       obj.model() = node["model"].as<std::string>();
-//      obj.position() = node["position"].as<Eigen::Vector3f>();
+      //      obj.position() = node["position"].as<Eigen::Vector3f>();
       obj.orientation() = node["orientation"].as<Eigen::Vector3f>();
       Eigen::Vector3f min = node["min"].as<Eigen::Vector3f>();
       Eigen::Vector3f max = node["max"].as<Eigen::Vector3f>();
@@ -82,7 +82,7 @@ namespace YAML {
 
 using namespace std;
 
-Object::Object():_octree(new octomap::OcTree(0.05)){
+Object::Object():_octree(new octomap::OcTree(0.05)){ //0.05
   _model = "";
   _position.setZero();
   _min.setZero();
@@ -91,6 +91,7 @@ Object::Object():_octree(new octomap::OcTree(0.05)){
   _cloud = PointCloud::Ptr (new PointCloud());
   _fre_voxel_cloud = PointCloud::Ptr (new PointCloud());
   _occ_voxel_cloud = PointCloud::Ptr (new PointCloud());
+  _ocupancy_volume =ros::Time::now().toSec();
 }
 
 Object::Object(const string &model_,
@@ -107,7 +108,7 @@ Object::Object(const string &model_,
   _cloud(cloud_),
   _octree(new octomap::OcTree(0.05)),
   _fre_voxel_cloud(new PointCloud()),
-  _occ_voxel_cloud(new PointCloud()){}
+  _occ_voxel_cloud(new PointCloud()){_ocupancy_volume=ros::Time::now().toSec();}
 
 Object::Object(const string &model_,
                const Eigen::Vector3f &position_,
@@ -125,7 +126,7 @@ Object::Object(const string &model_,
   _color(color_),
   _cloud(new PointCloud()),
   _fre_voxel_cloud(new PointCloud()),
-  _occ_voxel_cloud(new PointCloud()){
+  _occ_voxel_cloud(new PointCloud()){_ocupancy_volume =ros::Time::now().toSec();
 
   pcl::io::loadPCDFile<Point> (cloud_filename, *_cloud);
 
@@ -148,7 +149,41 @@ Object::Object(const Object &obj):
   _cloud(obj.cloud()),
   _octree(obj.octree()),
   _fre_voxel_cloud(obj.freVoxelCloud()),
-  _occ_voxel_cloud(obj.occVoxelCloud()){}
+  _occ_voxel_cloud(obj.occVoxelCloud()),
+  _ocupancy_volume(obj.ocupancy_volume()){}
+
+
+/*Object::Object(const Object &obj):
+  _model(obj.model()),
+  _position(obj.position()),
+  _min(obj.min()),
+  _max(obj.max()),
+  _color(obj.color()),
+  _cloud(obj.cloud()),
+  _octree(obj.octree()),
+  _fre_voxel_cloud(obj.freVoxelCloud()),
+  _occ_voxel_cloud(obj.occVoxelCloud()){_ocupancy_volume =ros::Time::now().toSec();}*/
+
+Object::Object(const string &model_,    // AHHHHHHHHHHH
+               const Eigen::Vector3f &position_,
+               const Eigen::Vector3f &min_,
+               const Eigen::Vector3f &max_,
+               const Eigen::Vector3f &color_,
+               const PointCloud::Ptr & cloud_,
+               octomap::OcTree* &octree_,
+               const PointCloud::Ptr & fre_voxel_cloud_,
+               const PointCloud::Ptr & occ_voxel_cloud_,
+               const float ocupancy_volume_):
+  _model(model_),
+  _position(position_),
+  _min(min_),
+  _max(max_),
+  _color(color_),
+  _cloud(cloud_),
+  _octree(octree_),
+  _fre_voxel_cloud(fre_voxel_cloud_),
+  _occ_voxel_cloud(occ_voxel_cloud_),
+  _ocupancy_volume(ocupancy_volume_){}
 
 Object::~Object(){
   delete _octree;
@@ -168,10 +203,10 @@ bool Object::inRange(const Point &point) const{
           point.z >= _min.z() && point.z <= _max.z());
 }
 
-bool Object::inRange(const float &x, const float &y, const float &z) const{
-  return (x >= _min.x() && x <= _max.x() &&
-          y >= _min.y() && y <= _max.y() &&
-          z >= _min.z() && z <= _max.z());
+bool Object::inRange(const float &x, const float &y, const float &z, const float &off) const{
+  return (x >= _min.x() - off && x <= _max.x() + off &&
+          y >= _min.y() - off && y <= _max.y() + off &&
+          z >= _min.z() - off && z <= _max.z() + off);
 }
 
 void Object::merge(const ObjectPtr & o){
@@ -189,14 +224,14 @@ void Object::merge(const ObjectPtr & o){
     _max.z() = o->max().z();
 
   _position = (_min+_max)/2.0f;
-
+  _ocupancy_volume= ros::Time::now().toSec();
   //add new points
   *_cloud += *o->cloud();
 
   //voxelize
   PointCloud::Ptr cloud_filtered (new PointCloud());
   _voxelizer.setInputCloud(_cloud);
-//  _voxelizer.setLeafSize(0.05f,0.05f,0.05f);
+  //  _voxelizer.setLeafSize(0.05f,0.05f,0.05f);
   _voxelizer.setLeafSize(0.02f,0.02f,0.02f);
   _voxelizer.filter(*cloud_filtered);
 
@@ -214,21 +249,161 @@ void Object::updateOccupancy(const Eigen::Isometry3f &T, const PointCloud::Ptr &
   for(const Point& pt : cloud->points)
     scan.push_back(pt.x,pt.y,pt.z);
 
-  octomap::point3d origin(T.translation().x(),T.translation().y(),T.translation().z());
-  _octree->insertPointCloud(scan,origin);
+  octomap::point3d sensor_origin(T.translation().x(),T.translation().y(),T.translation().z());
+  //std::cout << T.operator()(0,0) << std::endl;
+  //std::cout << T.linear() << std::endl;
+  float cameraYawAngle=atan2 (T.operator()(1,0),T.operator()(0,0));  //#TODO check if "T.linear().eulerAngles(0, 1, 2)[2];" is the same
+  //std::cout << " Z angle: " << cameraYawAngle << std::endl;
+  //Eigen::AngleAxisf x;
+  //x.fromRotationMatrix(T.linear());
+  //std::cout << "AngleZ... " << x.axis() << std::endl;
+  //rotationAngles.fromRotationMatrix(T.linear());
+  _octree->insertPointCloud(scan,sensor_origin);
+  
+  /* if(round(_last_processed_view.x())==round(sensor_origin.x()) && round(_last_processed_view.y())==round(sensor_origin.y())){
+    return;
+  } else{
+    std::cout << "You mooved! I have to do everything again, thank you Jose..." << std::endl ;
+  } */
+  
+  octomap::Pointcloud wall_point_cloud; //  wall_point_cloud will represent the sensor FoV in global coordinates.
+  octomap::point3d wall_point(1,0,0);    //  each point3d to be inserted into Pointwall
 
+  for(int y=1;y<321;y++){
+    for(int z=1;z<241;z++){
+      wall_point.y()= (-0.560027)+(y*0.003489);
+      wall_point.z()= (-0.430668)+(z*0.003574);
+      wall_point_cloud.push_back(wall_point);
+    }
+  }
+
+  octomath::Vector3 translation(0,0,0);
+  float roll=atan2(_position.y()-sensor_origin.y(),_position.x()-sensor_origin.x());
+  //std::cout << " yawn: " << roll << std::endl;
+  octomath::Quaternion rotation(0,0,-cameraYawAngle);
+  octomap::pose6d isometry(translation,rotation);
+  wall_point_cloud.transform(isometry);
+
+  //>>>>>>>>>> Create background wall to identify known empty volxels <<<<<<<<<<
+
+  /*	A background wall is built leaving empty the shadow of the object, this is
+      necesary so that the octree can recognize what area is empty known and
+      unknown, otherwise it will assume all tree.writeBinary("check.bt");surroundings of the cloud as unknown.  */
+
+  float alpha;	//	Angle in xy plane from sensorOrigin to each point in Pointwall
+  float beta;		//	Elevation angle from sensorOrigin to each point in Pointwall
+  float xp, yp, zp;		//	x,y,z coordinates of each point in Pointwall expressed in sensorOrigin coordinates
+  float leg_adjacent_point_wall;		//	Leg adjacent length of a right triangle formed from sensorOrigin to each point in Pointwall
+  float leg_adjacent_background_point;		//	Leg adjacent length of a right triangle formed from sensorOrigin to the new background point
+  float distance;		//  Distance from the sensorOrigin and the new background point
+  octomap::Pointcloud background_wall;     //  Pointcloud holding the background wall
+  octomap::point3d iterator; //  Helper needed for castRay function
+
+  //  distance will be computed so that the wall is always behind the object
+  //  distance = 2D_Distance-Centroid-FarthermostPointInBBox + offset + 2D_Distance-sensorOrigin-Centroid
+  float OFFSET=0.1;
+  Eigen::Vector3f squared_distances;
+  squared_distances[0]=pow(_position.x()-(_max.x()+OFFSET),2);
+  squared_distances[1]=pow(_position.y()-(_max.y()+OFFSET),2);
+  distance=sqrt(squared_distances[0]+squared_distances[1]);
+  squared_distances[0]=pow(_position.x()-sensor_origin.x(),2);
+  squared_distances[1]=pow(_position.y()-sensor_origin.y(),2);
+
+  distance+=sqrt(squared_distances[0]+squared_distances[1]);
+  //std::cout << "Raytracing..." << std::endl;
+  for(int i=0;i<wall_point_cloud.size();i++){
+      //std::cout << ".";
+
+    if(!_octree->castRay(sensor_origin,wall_point_cloud.getPoint(i),iterator,false,distance)){
+
+      //	Transform pointwall point to sensorOrigin coordinates subtracting sensorOrigin
+      xp=wall_point_cloud.getPoint(i).x();
+      yp=wall_point_cloud.getPoint(i).y();
+      zp=wall_point_cloud.getPoint(i).z();
+
+      //	Get alpha and beta angles
+      alpha=atan2(yp,xp);
+      leg_adjacent_point_wall=sqrt((xp*xp)+(yp*yp));
+      beta=atan2(zp,leg_adjacent_point_wall);
+
+      //	Get the new background points and return to global coordinates by adding sensorOrigin
+      iterator.z()=sensor_origin.z()+distance*sin(beta);
+      leg_adjacent_background_point=sqrt((distance*distance)-(zp*zp));
+      iterator.y()=sensor_origin.y()+leg_adjacent_background_point*sin(alpha);
+      iterator.x()=sensor_origin.x()+leg_adjacent_background_point*cos(alpha);
+
+      background_wall.push_back(iterator);		//	add points to point cloud
+    }
+  }
+   //std::cout << " Raytrace completed! " << std::endl;
+
+  _octree->insertPointCloud(background_wall,sensor_origin);     //  Check if i can use other than scan, since it contains the cloud
+   
+
+   // TODO maybe we can join the leaf iterators since we are revisiting the same tree
+  
   octomap::point3d p;
   Point pt;
   _occ_voxel_cloud->clear();
   _fre_voxel_cloud->clear();
-  for(octomap::OcTree::tree_iterator it = _octree->begin_tree(_octree->getTreeDepth()),end=_octree->end_tree(); it!= end; ++it) {
+  _ocupancy_volume=0.0; 
+  _ocupancy_volume =ros::Time::now().toSec();           //DEBUGING: DELETE THIS
+  //std::cout << _model <<" TIMESTAMP: " << _ocupancy_volume << std::endl;
+  OFFSET+=-0.01;
+  //first loop to remove useless voxels (thanks to Hornung) 
+  for(octomap::OcTree::tree_iterator it = _octree->begin_tree(_octree->getTreeDepth()),end=_octree->end_tree(); it!= end; ++it) {    //TODO use leaf iterator
+    if (it.isLeaf()) {   // #TODO better use a leaf iterator right?
+      p = it.getCoordinate();
+      octomap::OcTreeNode * iteratorNode=_octree->search(it.getKey());
+      if(!inRange(p.x(),p.y(),p.z(),OFFSET)){
+        _octree->deleteNode(it.getKey());
+      }else if(iteratorNode->getOccupancy()>0.49){              //#TODO Here I am counting also the unknown voxels.  
+        //_ocupancy_volume+=pow(it.getSize(),3);                //DEBUGING: UNCOMENT THIS
+        //_octree->deleteNode(it.getKey());
+        //octomap::OcTreeNode * unknownCloudnodes=_octree->updateNode(it.getKey(),false);             //just to check, delete after
+        //unknownCloudnodes->setValue(99);
+      }
+
+    
+    }
+  }
+  
+/*    //>>>>>>>>>> Uncomment to draw the unknown voxels in _octree <<<<<<<<<<
+  
+  for (float ix = _min.x()-OFFSET; ix < _max.x()+OFFSET; ix += 0.04){
+
+    for (float iy = _min.y()-OFFSET; iy < _max.y()+OFFSET; iy += 0.04){
+
+      for (float iz = _min.z()-OFFSET; iz < _max.z()+OFFSET; iz += 0.04){
+
+        if (_octree->search(ix,iy,iz)==NULL){		//	If ==NULL it did not find any known (occupied or empty) voxel
+
+          //check if the unknown voxel was previously seen 
+          //	Add a voxel in the empty position in the cloudAndUnknown OcTree
+          iterator.x()=ix;
+          iterator.y()=iy;
+          iterator.z()=iz;
+          
+          octomap::OcTreeNode * unknownCloudnodes=_octree->updateNode(iterator,true); 
+
+        } 
+          
+      }
+
+    }
+
+  } 
+  _octree->writeBinary(_model+"_object_checka.bt");  */
+
+  
+
+  //second loop to store useful voxels
+  for(octomap::OcTree::tree_iterator it = _octree->begin_tree(_octree->getTreeDepth()),end=_octree->end_tree(); it!= end; ++it) {  //TODO use leaf iterator
     if (it.isLeaf()) {
       p = it.getCoordinate();
+      octomap::OcTreeNode * iteratorNode=_octree->search(it.getKey());
 
-      if(!inRange(p.x(),p.y(),p.z()))
-        continue;
-
-      if (_octree->isNodeOccupied(*it)){ // occupied voxels
+      if (iteratorNode->getOccupancy()>0.49){ // occupied voxels   AAAHHHHHHHH!   isNode Occupied? we dont actually know how it works, change for check occupancy
         pt.x = p.x();
         pt.y = p.y();
         pt.z = p.z();
@@ -242,6 +417,9 @@ void Object::updateOccupancy(const Eigen::Isometry3f &T, const PointCloud::Ptr &
       }
     }
   }
+  _last_processed_view.x()=sensor_origin.x();
+  _last_processed_view.y()=sensor_origin.y();
+
   _fre_voxel_cloud->width = _fre_voxel_cloud->size();
   _fre_voxel_cloud->height = 1;
 

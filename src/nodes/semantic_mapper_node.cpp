@@ -25,6 +25,8 @@
 
 #include <visualization_msgs/Marker.h>
 
+#include <fstream>
+
 typedef cv::Mat_<cv::Vec3b> RGBImage;
 
 class SemanticMapperNode{
@@ -48,6 +50,9 @@ public:
     _camera_offset.setIdentity();
     _camera_offset.linear() = Eigen::Quaternionf(0.5,-0.5,0.5,-0.5).toRotationMatrix();
 
+    _nh.param("environment",_detector.environment(),std::string("garage"));
+    _detector.setupModelColors();
+
     ROS_INFO("Running semantic_mapper_node...");
   }
 
@@ -61,11 +66,16 @@ public:
     //check that delay between messages is below a threshold
     ros::Time image_stamp = logical_image_msg->header.stamp;
     ros::Time depth_stamp;
-    pcl_conversions::fromPCL(depth_points_msg->header.stamp,depth_stamp);
-    ros::Duration stamp_diff = image_stamp - depth_stamp;
-    if(std::abs(stamp_diff.toSec()) > 0.03)
-      return;
+    //pcl_conversions::fromPCL(depth_points_msg->header.stamp,depth_stamp);
+    //ros::Duration stamp_diff = image_stamp - depth_stamp;
+//    std::cerr << "Logical stamp: " << image_stamp.toSec() << std::endl;
+//    std::cerr << "Depth stamp: " << depth_stamp.toSec() << std::endl;
+//    std::cerr << "Diff: " << std::abs(stamp_diff.toSec()) << std::endl;
+/*    if(std::abs(stamp_diff.toSec()) > 0.05)
+      std::cerr << "TE ENCONTRE LA CHUCHA!" <<std::endl;
+      return;*/
 
+//    ROS_INFO("executing callback!!!");
     std::cerr << ".";
 
     _last_timestamp = image_stamp;
@@ -98,17 +108,18 @@ public:
     //update
     _mapper.mergeMaps();
 
+    //publish label image
+    if(_detector.detections().size()){
+      sensor_msgs::ImagePtr label_image_msg;
+      makeLabelImageFromDetections(label_image_msg,detections);
+      _label_image_pub.publish(label_image_msg);
+    }
     //publish semantic map message
     if(_mapper.globalMap()->size()){
       lucrezio_semantic_mapper::SemanticMap sm_msg;
       makeMsgFromMap(sm_msg,_mapper.globalMap());
       _sm_pub.publish(sm_msg);
     }
-
-    //publish label image
-    sensor_msgs::ImagePtr label_image_msg;
-    makeLabelImageFromDetections(label_image_msg,detections);
-    _label_image_pub.publish(label_image_msg);
 
     //publish map point cloud
     if(_mapper.globalMap()->size()){
@@ -157,6 +168,7 @@ protected:
   ros::Publisher _marker_pub;
 
 private:
+
   Eigen::Isometry3f tfTransform2eigen(const tf::Transform& p){
     Eigen::Isometry3f iso;
     iso.translation().x()=p.getOrigin().x();
@@ -219,12 +231,13 @@ private:
   void makeMsgFromMap(lucrezio_semantic_mapper::SemanticMap &sm_msg, const ObjectPtrVector *global_map){
     sm_msg.header.stamp = _last_timestamp;
     sm_msg.header.frame_id = "/map";
+    float volumes=0;
+    std::ofstream outfile;
     for(int i=0; i<global_map->size(); ++i){
       const ObjectPtr& obj = global_map->at(i);
       lucrezio_semantic_mapper::Object o;
       //model
       o.type = obj->model();
-//      std::cerr << obj->model() << ": ";
 
       //position
       o.position.x = obj->position().x();
@@ -246,33 +259,51 @@ private:
       o.color.y = obj->color().y();
       o.color.z = obj->color().z();
 
+      //OCTREEEEEEEEEEEE
+      //o.octree = obj->octree();    //AHHHHH
+      //OUTFILEs for testing
+      //volume
+      //std::cout << "dooing some shie!"<<std::endl;
+      //volumes= ((o.max.x-o.min.x+0.02)*(o.max.y-o.min.y+0.02)*(o.max.z-o.min.z+0.02));
+      
+      //std::string volume_filename = obj->model()+"_volume.txt";
+      /*std::cout << "processing " <<  obj->model() << " in " << volume_filename << std::endl;
+      std::cout << "max in " <<  obj->max().x() << " - " << obj->max().y() << std::endl;
+      std::cout << "min in " <<  obj->min().x() << " - " << obj->min().y() << std::endl;
+      std::cout << "center in " <<  obj->position().x() << " - " << obj->position().y() << std::endl;
+ */
+/*       double seconds = ros::Time::now().toSec();
+      outfile.open(volume_filename.c_str(),std::ios_base::app);
+      outfile << seconds << "\t" << volumes << "\t" << obj->ocupancy_volume() << "\t" << (obj->ocupancy_volume()/volumes)*100 << "\n";
+      outfile.close(); */
+      //o.octree= obj->octree();
       //cloud
-//      std::cerr << "cloud(" << obj->cloud()->size() << ") - ";
       const std::string cloud_filename = obj->model()+".pcd";
       o.cloud_filename = cloud_filename;
       pcl::io::savePCDFileASCII(cloud_filename,*(obj->cloud()));
 
       //octree
-      const std::string octree_filename = obj->model()+".ot";
+      const std::string octree_filename = obj->model()+".bt";
       o.octree_filename = octree_filename;
       obj->octree()->writeBinary(octree_filename);
+
 
       //fre voxel cloud
       o.fre_voxel_cloud_filename = "...";
       if(obj->freVoxelCloud()->size()){
-        const std::string fre_voxel_cloud_filename = obj->model()+"_fre.pcd";
-        o.fre_voxel_cloud_filename = fre_voxel_cloud_filename;
-        pcl::io::savePCDFileASCII(fre_voxel_cloud_filename,*(obj->freVoxelCloud()));
+       const std::string fre_voxel_cloud_filename = obj->model()+"_fre.pcd";
+       o.fre_voxel_cloud_filename = fre_voxel_cloud_filename;
+      pcl::io::savePCDFileASCII(fre_voxel_cloud_filename,*(obj->freVoxelCloud()));
       }
 
       //occ voxel cloud
       o.occ_voxel_cloud_filename = "...";
       if(obj->occVoxelCloud()->size()){
-        const std::string occ_voxel_cloud_filename = obj->model()+"_occ.pcd";
-        o.occ_voxel_cloud_filename = occ_voxel_cloud_filename;
-        pcl::io::savePCDFileASCII(occ_voxel_cloud_filename,*(obj->occVoxelCloud()));
+       const std::string occ_voxel_cloud_filename = obj->model()+"_occ.pcd";
+       o.occ_voxel_cloud_filename = occ_voxel_cloud_filename;
+       pcl::io::savePCDFileASCII(occ_voxel_cloud_filename,*(obj->occVoxelCloud()));
       }
-
+      std::cerr << obj->model() << " timestamp: " << obj->ocupancy_volume() << std::endl;
       sm_msg.objects.push_back(o);
     }
   }
@@ -323,7 +354,6 @@ private:
     }
     cloud->width = num_points;
     pcl_conversions::toPCL(_last_timestamp, cloud->header.stamp);
-
   }
 
   void makeMarkerFromMap(visualization_msgs::Marker &marker, const ObjectPtrVector *global_map){
@@ -405,17 +435,17 @@ private:
 int main(int argc, char **argv){
 
   ros::init(argc, argv, "semantic_mapper_node");
-  ros::NodeHandle nh;
+  ros::NodeHandle nh("~");
 
   SemanticMapperNode mapper(nh);
 
-  ros::spin(); //commented
+  ros::spin();
 
-  /*ros::Rate rate(1);  //uncommented
-  while(ros::ok()){
-    ros::spinOnce();
-    rate.sleep();
-  }*/
+//  ros::Rate rate(1);
+//  while(ros::ok()){
+//    ros::spinOnce();
+//    rate.sleep();
+//  }
 
   return 0;
 }

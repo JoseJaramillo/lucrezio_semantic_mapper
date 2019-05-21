@@ -13,7 +13,7 @@
 #include <pcl/common/norms.h>
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/io/pcd_io.h>
-
+#include <ros/time.h>
 #include <octomap/OcTree.h>
 
 #include <yaml-cpp/yaml.h>
@@ -27,6 +27,7 @@ typedef std::vector<ObjectPtr> ObjectPtrVector;
 typedef std::map<ObjectPtr,int> ObjectPtrIdMap;
 typedef std::set<ObjectPtr> ObjectPtrSet;
 typedef std::map<std::string,Object> ObjectStringMap;
+typedef std::map<std::string,ObjectPtr> StringObjectPtrMap;
 
 class GtObject;
 typedef std::map<std::string,GtObject> GtObjectStringMap;
@@ -56,6 +57,17 @@ class Object {
            const std::string &octree_filename,
            const std::string &fre_voxel_cloud_filename,
            const std::string &occ_voxel_cloud_filename);
+    
+    Object(const std::string &model_,    // AHHHHHHHHHHH
+               const Eigen::Vector3f &position_,
+               const Eigen::Vector3f &min_,
+               const Eigen::Vector3f &max_,
+               const Eigen::Vector3f &color_,
+               const PointCloud::Ptr & cloud_,
+               octomap::OcTree* &octree_,
+               const PointCloud::Ptr & fre_voxel_cloud_,
+               const PointCloud::Ptr & occ_voxel_cloud_,
+               const float _ocupancy_volume);
 
     Object(const Object& obj);
 
@@ -78,6 +90,8 @@ class Object {
     inline Eigen::Vector3f &color() {return _color;}
     inline const PointCloud::Ptr &cloud() const {return _cloud;}
     inline PointCloud::Ptr &cloud() {return _cloud;}
+    inline const float ocupancy_volume() const {return _ocupancy_volume;}
+    inline float ocupancy_volume() {return _ocupancy_volume;}    
 
     inline const PointCloud::Ptr &freVoxelCloud() const {return _fre_voxel_cloud;}
     inline const PointCloud::Ptr &occVoxelCloud() const {return _occ_voxel_cloud;}
@@ -88,7 +102,7 @@ class Object {
     bool inRange(const Point &point) const;
 
     //check if a point falls in the bounding box
-    bool inRange(const float& x, const float& y, const float& z) const;
+    bool inRange(const float& x, const float& y, const float& z, const float& off) const;
 
     //merge two objects
     void merge(const ObjectPtr &o);
@@ -116,6 +130,12 @@ class Object {
     //object point cloud
     PointCloud::Ptr _cloud;
 
+    //ocupancy volume
+    float _ocupancy_volume;
+
+    //last processed view
+    octomap::point3d _last_processed_view;
+    
     pcl::VoxelGrid<Point> _voxelizer;
 
     octomap::OcTree* _octree;
@@ -154,4 +174,3 @@ protected:
   Eigen::Vector3f _min;
   Eigen::Vector3f _max;
 };
-
