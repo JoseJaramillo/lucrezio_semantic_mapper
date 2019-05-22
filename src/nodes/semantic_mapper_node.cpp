@@ -259,24 +259,20 @@ private:
       o.color.y = obj->color().y();
       o.color.z = obj->color().z();
 
-      //OCTREEEEEEEEEEEE
-      //o.octree = obj->octree();    //AHHHHH
-      //OUTFILEs for testing
       //volume
-      //std::cout << "dooing some shie!"<<std::endl;
-      //volumes= ((o.max.x-o.min.x+0.02)*(o.max.y-o.min.y+0.02)*(o.max.z-o.min.z+0.02));
+
+      volumes= ((o.max.x-o.min.x+0.02)*(o.max.y-o.min.y+0.02)*(o.max.z-o.min.z+0.02));
       
-      //std::string volume_filename = obj->model()+"_volume.txt";
-      /*std::cout << "processing " <<  obj->model() << " in " << volume_filename << std::endl;
-      std::cout << "max in " <<  obj->max().x() << " - " << obj->max().y() << std::endl;
-      std::cout << "min in " <<  obj->min().x() << " - " << obj->min().y() << std::endl;
-      std::cout << "center in " <<  obj->position().x() << " - " << obj->position().y() << std::endl;
- */
-/*       double seconds = ros::Time::now().toSec();
+      std::string volume_filename = obj->model()+"_volume.txt";
+
+       double seconds = ros::Time::now().toSec();
       outfile.open(volume_filename.c_str(),std::ios_base::app);
-      outfile << seconds << "\t" << volumes << "\t" << obj->ocupancy_volume() << "\t" << (obj->ocupancy_volume()/volumes)*100 << "\n";
-      outfile.close(); */
-      //o.octree= obj->octree();
+      outfile << seconds << "\t" << volumes << "\t" << obj->ocupancy_volume() << "\t" 
+      << (obj->ocupancy_volume()/volumes)*100 << "\t" << obj->freVoxelCloud()->size() <<"\t" 
+      << obj->occVoxelCloud()->size() <<"\n";
+      
+      outfile.close(); 
+
       //cloud
       const std::string cloud_filename = obj->model()+".pcd";
       o.cloud_filename = cloud_filename;
