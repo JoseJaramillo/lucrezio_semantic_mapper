@@ -276,7 +276,7 @@ void Object::updateOccupancy(const Eigen::Isometry3f &T, const PointCloud::Ptr &
   /*	A background wall is built leaving empty the shadow of the object, this is
       necesary so that the octree can recognize what area is empty known and
       unknown, otherwise it will assume all tree.writeBinary("check.bt");surroundings of the cloud as unknown.  */
-
+  
   float alpha;	//	Angle in xy plane from sensorOrigin to each point in Pointwall
   float beta;		//	Elevation angle from sensorOrigin to each point in Pointwall
   float xp, yp, zp;		//	x,y,z coordinates of each point in Pointwall expressed in sensorOrigin coordinates
@@ -297,7 +297,7 @@ void Object::updateOccupancy(const Eigen::Isometry3f &T, const PointCloud::Ptr &
   squared_distances[1]=pow(_position.y()-sensor_origin.y(),2);
 
   distance+=sqrt(squared_distances[0]+squared_distances[1]);
-  //std::cout << "Raytracing..." << std::endl;
+  
   for(int i=0;i<wall_point_cloud.size();i++){
       //std::cout << ".";
 
@@ -322,9 +322,11 @@ void Object::updateOccupancy(const Eigen::Isometry3f &T, const PointCloud::Ptr &
       background_wall.push_back(iterator);		//	add points to point cloud
     }
   }
-   //std::cout << " Raytrace completed! " << std::endl;
 
-  _octree->insertPointCloud(background_wall,sensor_origin);     //  Check if i can use other than scan, since it contains the cloud
+ 
+  // std::cout << " Raytrace completed! " <<std::endl;
+
+  _octree->insertPointCloud(background_wall,sensor_origin);    
    
   octomap::point3d p;
   Point pt;
@@ -334,60 +336,15 @@ void Object::updateOccupancy(const Eigen::Isometry3f &T, const PointCloud::Ptr &
   
   OFFSET+=-0.01;
 
-  //first loop to remove useless voxels (thanks to Hornung) 
-  /*
-  for(octomap::OcTree::tree_iterator it = _octree->begin_tree(_octree->getTreeDepth()),end=_octree->end_tree(); it!= end; ++it) {    //TODO use leaf iterator
-    if (it.isLeaf()) {   // #TODO better use a leaf iterator right?
-      p = it.getCoordinate();
-      octomap::OcTreeNode * iteratorNode=_octree->search(it.getKey());
-      if(!inRange(p.x(),p.y(),p.z(),OFFSET)){
-        _octree->deleteNode(it.getKey());
-      }else if(iteratorNode->getOccupancy()>0.49){              //#TODO Here I am counting also the unknown voxels.  
-        _ocupancy_volume+=pow(it.getSize(),3);                
-      }
 
-    
-    }
-  }
-  */
-/*    //>>>>>>>>>> Uncomment to draw the unknown voxels in _octree <<<<<<<<<<
-  
-  for (float ix = _min.x()-OFFSET; ix < _max.x()+OFFSET; ix += 0.04){
 
-    for (float iy = _min.y()-OFFSET; iy < _max.y()+OFFSET; iy += 0.04){
+  for(octomap::OcTree::leaf_iterator it = _octree->begin_leafs(),end=_octree->end_leafs(); it!= end; ++it) {  
 
-      for (float iz = _min.z()-OFFSET; iz < _max.z()+OFFSET; iz += 0.04){
-
-        if (_octree->search(ix,iy,iz)==NULL){		//	If ==NULL it did not find any known (occupied or empty) voxel
-
-          //check if the unknown voxel was previously seen 
-          //	Add a voxel in the empty position in the cloudAndUnknown OcTree
-          iterator.x()=ix;
-          iterator.y()=iy;
-          iterator.z()=iz;
-          
-          octomap::OcTreeNode * unknownCloudnodes=_octree->updateNode(iterator,true); 
-
-        } 
-          
-      }
-
-    }
-
-  } 
-  _octree->writeBinary(_model+"_object_checka.bt");  */
-
-  
-
-  //second loop to store useful voxels
-
-  for(octomap::OcTree::leaf_iterator it = _octree->begin_leafs(),end=_octree->end_leafs(); it!= end; ++it) {  //TODO use leaf iterator
-    
     p = it.getCoordinate();
     octomap::OcTreeNode * iteratorNode=_octree->search(it.getKey());
     if(!inRange(p.x(),p.y(),p.z(),OFFSET)){
       _octree->deleteNode(it.getKey());
-    }else if (iteratorNode->getOccupancy()>0.49){ // occupied voxels   AAAHHHHHHHH!   isNode Occupied? we dont actually know how it works, change for check occupancy
+    }else if (iteratorNode->getOccupancy()>0.49){ // occupied voxels 
       pt.x = p.x();
       pt.y = p.y();
       pt.z = p.z();
